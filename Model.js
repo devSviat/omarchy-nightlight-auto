@@ -12,6 +12,7 @@ function emptyStatus() {
     estimated: false,
     running: false,
     paused: false,
+    mode: "auto",
     generated: false,
     setup: false,
     scheduledTemperature: null,
@@ -41,6 +42,7 @@ function parseStatus(raw) {
     s.estimated = data.estimated === true
     s.running = data.running === true
     s.paused = data.paused === true
+    s.mode = (data.mode === "on" || data.mode === "off") ? data.mode : "auto"
     s.generated = data.generated === true
     s.setup = data.setup === true
     s.scheduledTemperature = normaliseTemp(data.scheduled_temperature)
@@ -143,7 +145,8 @@ function locationLabel(status) {
 
 function summaryLine(status) {
   if (!status.ok) return "Sunset Night Light"
-  if (status.paused) return "Night light paused"
+  if (status.mode === "off") return "Night light off (manual) · click to open"
+  if (status.mode === "on") return "Night light on (manual) · " + tempLabel(status.nightTemp)
   if (!status.running) return "hyprsunset is not running"
   var now = tempLabel(status.scheduledTemperature)
   if (status.nextAt) return now + " · " + tempLabel(status.nextTemperature) + " at " + status.nextAt
@@ -153,7 +156,9 @@ function summaryLine(status) {
 // Which stage of the evening the ramp is in. Callers map this to a glyph --
 // the names stay here so the indicator mark and the panel cannot disagree
 // about where the boundaries are, while the glyphs live in the QML.
-function rampStage(tinted, fraction) {
+function rampStage(tinted, fraction, mode) {
+  if (mode === "on") return "on"
+  if (mode === "off") return "off"
   if (!tinted) return "day"
   if (fraction < 0.34) return "dusk"
   if (fraction < 0.75) return "night"
@@ -162,6 +167,8 @@ function rampStage(tinted, fraction) {
 
 function stageLabel(stage) {
   if (stage === "day") return "Night light off"
+  if (stage === "on") return "On (manual)"
+  if (stage === "off") return "Off (manual)"
   if (stage === "dusk") return "Warming"
   if (stage === "night") return "Warm"
   return "Warmest"

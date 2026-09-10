@@ -372,6 +372,7 @@ def test_validate_accepts_the_defaults():
 # configuration. These drive the real script in a throwaway XDG root.
 
 import os
+import shutil
 import subprocess
 import tempfile
 
@@ -556,6 +557,61 @@ def test_rendered_conf_mentions_the_morning_ramp():
     (steps, info), s = build(morning_anchor="civil_dawn")
     text = nl.render_conf(steps, s, info, -27.4667, 153.0333, "test", "Australia/Brisbane")
     assert "civil dawn" in text
+
+
+# -------------------------------------------------------------------- modes
+
+
+def test_held_conf_on_and_off():
+    off = nl.render_held_conf("Australia/Brisbane", None)
+    on = nl.render_held_conf("Australia/Brisbane", 4000)
+    assert nl.MARKER in off and nl.MARKER in on
+    assert "identity = true" in off and "temperature" not in off.split("profile")[1]
+    assert "temperature = 4000" in on and "identity" not in on.split("profile")[1]
+    assert nl.render_paused_conf("Australia/Brisbane") == off
+
+
+def test_on_off_auto_write_the_matching_conf():
+    root = sandbox()
+    try:
+        assert run_cli(root, "setup", "--yes").returncode == 0
+        conf = root / "cfg" / "hypr" / "hyprsunset.conf"
+        assert conf.read_text().count("profile {") > 2
+
+        assert run_cli(root, "on").returncode == 0
+        text = conf.read_text()
+        assert text.count("profile {") == 1 and "temperature = 3000" in text
+        status = json.loads(run_cli(root, "status", "--json").stdout)
+        assert status["mode"] == "on" and status["paused"] is False
+
+        assert run_cli(root, "off").returncode == 0
+        text = conf.read_text()
+        assert text.count("profile {") == 1 and "identity = true" in text
+        status = json.loads(run_cli(root, "status", "--json").stdout)
+        assert status["mode"] == "off" and status["paused"] is True
+
+        assert run_cli(root, "resume").returncode == 0
+        assert json.loads(run_cli(root, "status", "--json").stdout)["mode"] == "auto"
+        assert run_cli(root, "toggle").returncode == 0
+        assert json.loads(run_cli(root, "status", "--json").stdout)["mode"] == "off"
+
+        assert run_cli(root, "auto").returncode == 0
+        assert conf.read_text().count("profile {") > 2
+        assert json.loads(run_cli(root, "status", "--json").stdout)["mode"] == "auto"
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_legacy_paused_marker_reads_as_off():
+    root = sandbox()
+    try:
+        assert run_cli(root, "setup", "--yes").returncode == 0
+        (root / "state" / "nightlight-auto").mkdir(parents=True, exist_ok=True)
+        (root / "state" / "nightlight-auto" / "paused").touch()
+        status = json.loads(run_cli(root, "status", "--json").stdout)
+        assert status["mode"] == "off" and status["paused"] is True
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
 
 
 if __name__ == "__main__":

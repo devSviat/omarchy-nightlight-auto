@@ -34,7 +34,9 @@ SETTINGS_PATH = CONFIG_DIR / "nightlight-auto" / "config.json"
 HYPRSUNSET_CONF = CONFIG_DIR / "hypr" / "hyprsunset.conf"
 STATE_DIR = Path(os.environ.get("XDG_STATE_HOME", HOME / ".local/state")) / "nightlight-auto"
 STATE_PATH = STATE_DIR / "state.json"
-PAUSE_PATH = STATE_DIR / "paused"
+PAUSE_PATH = STATE_DIR / "paused"   # legacy: pre-mode "off" marker
+MODE_PATH = STATE_DIR / "mode"
+MODES = ("auto", "on", "off")
 CONSENT_PATH = STATE_DIR / "consent.json"
 
 REPO = Path(__file__).resolve().parent.parent
@@ -490,16 +492,28 @@ def _finish(steps, day_start, settings):
 
 def render_paused_conf(tz_name: str) -> str:
     """A single identity profile: the display stays untinted around the clock."""
+    return render_held_conf(tz_name, None)
+
+
+def render_held_conf(tz_name: str, temperature) -> str:
+    """One profile around the clock: untinted (None) or a fixed temperature.
+    This is what a manual `off` or `on` writes in place of the ladder."""
+    if temperature is None:
+        note = "# Off. Run `nightlight-auto auto` to put the ramp back."
+        value = "    identity = true"
+    else:
+        note = f"# On, held at {temperature}K. Run `nightlight-auto auto` to put the ramp back."
+        value = f"    temperature = {temperature}"
     return "\n".join([
         MARKER,
-        "# Paused. Run `nightlight-auto resume` to put the ramp back.",
+        note,
         f"# Settings live in {SETTINGS_PATH}",
         "#",
         f"# time zone : {tz_name}",
         "",
         "profile {",
         "    time = 00:00",
-        "    identity = true",
+        value,
         "}",
         "",
     ])
@@ -691,16 +705,29 @@ def disclosure() -> str:
     return "\n".join(lines)
 
 
+def get_mode() -> str:
+    """auto follows the ladder; on holds night_temp; off holds untinted."""
+    if MODE_PATH.exists():
+        mode = MODE_PATH.read_text().strip()
+        if mode in MODES:
+            return mode
+    return "off" if PAUSE_PATH.exists() else "auto"
+
+
+def set_mode(mode: str) -> None:
+    if mode not in MODES:
+        die(f"mode must be one of {', '.join(MODES)} (got {mode!r})")
+    MODE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    MODE_PATH.write_text(mode + "\n")
+    PAUSE_PATH.unlink(missing_ok=True)
+
+
 def is_paused() -> bool:
-    return PAUSE_PATH.exists()
+    return get_mode() == "off"
 
 
 def set_paused(paused: bool) -> None:
-    if paused:
-        PAUSE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        PAUSE_PATH.touch()
-    else:
-        PAUSE_PATH.unlink(missing_ok=True)
+    set_mode("off" if paused else "auto")
 
 
 # ---------------------------------------------------------------- commands
@@ -723,8 +750,11 @@ def cmd_generate(args) -> int:
         die("not set up yet, so nothing has been changed.\n"
             "       Run `nightlight-auto setup` to see what it would change and agree to it.")
     settings, tz_name, tz, lat, lon, source, today, steps, info = gather()
-    if is_paused():
+    mode = get_mode()
+    if mode == "off":
         body = render_paused_conf(tz_name)
+    elif mode == "on":
+        body = render_held_conf(tz_name, settings["night_temp"])
     else:
         body = render_conf(steps, settings, info, lat, lon, source, tz_name)
 
@@ -743,8 +773,12 @@ def cmd_generate(args) -> int:
     HYPRSUNSET_CONF.write_text(body)
 
     restarted = restart_hyprsunset()
-    if is_paused():
-        info_msg("paused: the display stays untinted"
+    if mode == "off":
+        info_msg("off: the display stays untinted"
+                 + ("; hyprsunset restarted" if restarted else ""))
+        return 0
+    if mode == "on":
+        info_msg(f"on: held at {settings['night_temp']}K"
                  + ("; hyprsunset restarted" if restarted else ""))
         return 0
     save_state({
@@ -814,6 +848,7 @@ def cmd_status(args) -> int:
         "night_temp": settings["night_temp"],
         "generated": HYPRSUNSET_CONF.exists() and MARKER in HYPRSUNSET_CONF.read_text(),
         "paused": is_paused(),
+        "mode": get_mode(),
         "setup": is_setup(),
     }
     if args.json:
@@ -834,8 +869,11 @@ def cmd_status(args) -> int:
     print(f"hyprsunset  {'running' if payload['running'] else 'not running'}"
           + (f", currently {payload['actual_temperature']}K"
              if payload["actual_temperature"] else ""))
-    if payload["paused"]:
-        print("state       PAUSED -- untinted until `nightlight-auto resume`")
+    if payload["mode"] == "off":
+        print("state       OFF -- untinted until `nightlight-auto auto`")
+        print(f"would be    {label(active[1])} since {payload['scheduled_since']}")
+    elif payload["mode"] == "on":
+        print(f"state       ON -- held at {settings['night_temp']}K until `nightlight-auto auto`")
         print(f"would be    {label(active[1])} since {payload['scheduled_since']}")
     else:
         print(f"scheduled   {label(active[1])} since {payload['scheduled_since']}")
@@ -900,6 +938,15 @@ def cmd_resume(args) -> int:
 
 def cmd_toggle(args) -> int:
     set_paused(not is_paused())
+    args.force = True
+    cmd_generate(args)
+    return 0
+
+
+def cmd_mode(args) -> int:
+    """`on`, `off` and `auto`: hold the night temperature, hold untinted, or
+    follow the ladder. `off` is the same thing as `pause`."""
+    set_mode(args.mode)
     args.force = True
     cmd_generate(args)
     return 0
@@ -1030,6 +1077,7 @@ def cmd_teardown(args) -> int:
 
     CONSENT_PATH.unlink(missing_ok=True)
     PAUSE_PATH.unlink(missing_ok=True)
+    MODE_PATH.unlink(missing_ok=True)
     subprocess.run(["systemctl", "--user", "restart", HYPRSUNSET_UNIT], capture_output=True)
 
     print("Undone. Your settings in", SETTINGS_PATH, "were left alone;")
@@ -1090,6 +1138,15 @@ def main() -> int:
 
     toggle = sub.add_parser("toggle", help="pause if running, resume if paused")
     toggle.set_defaults(func=cmd_toggle)
+
+    on = sub.add_parser("on", help="hold the night temperature until `auto`")
+    on.set_defaults(func=cmd_mode, mode="on")
+
+    off = sub.add_parser("off", help="hold untinted until `auto` (same as pause)")
+    off.set_defaults(func=cmd_mode, mode="off")
+
+    auto = sub.add_parser("auto", help="follow the sunset ramp again")
+    auto.set_defaults(func=cmd_mode, mode="auto")
 
     setup = sub.add_parser(
         "setup", help="show what would change, then activate once you agree")

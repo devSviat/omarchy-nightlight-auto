@@ -26,6 +26,8 @@ Panel {
   function refresh() { if (root.service) root.service.refresh() }
   function togglePause() { if (root.service) root.service.togglePause() }
   function rebuild() { if (root.service) root.service.rebuild() }
+  function setMode(mode) { if (root.service) root.service.setMode(mode) }
+  readonly property string mode: root.status.mode
   function acceptSetup() { if (root.service) root.service.acceptSetup() }
 
   // No IpcHandler here on purpose: Service.qml already claims the
@@ -47,9 +49,13 @@ Panel {
     id: button
     anchors.fill: parent
     bar: root.bar
+    // sun → sunset → moon → new moon as the evening deepens; a crossed-out
+    // sun for a manual off, a night bulb for a manual on.
     text: root.stage === "day" ? "󰖙"
-          : root.stage === "dusk" ? "󰖜"
-          : root.stage === "night" ? "󰖔" : "󰽤"
+          : root.stage === "dusk" ? "󰖛"
+          : root.stage === "night" ? "󰖔"
+          : root.stage === "off" ? "󱓤"
+          : root.stage === "on" ? "󱩌" : "󰽤"
     // Urgent colour is for a fault, not for the normal warm evening: the only
     // real fault here is hyprsunset being down, when nothing is applied at all.
     active: root.status.ok && !root.status.running
@@ -151,7 +157,9 @@ Panel {
               height: Style.space(12)
               radius: width / 2
               anchors.verticalCenter: parent.verticalCenter
-              color: Model.temperatureColor(root.status.scheduledTemperature)
+              color: Model.temperatureColor(root.mode === "on" ? root.status.nightTemp
+                                            : root.mode === "off" ? null
+                                            : root.status.scheduledTemperature)
               border.width: 1
               border.color: Qt.rgba(root.bar.foreground.r, root.bar.foreground.g,
                                     root.bar.foreground.b, 0.35)
@@ -161,7 +169,8 @@ Panel {
               anchors.verticalCenter: parent.verticalCenter
               text: {
                 if (!root.status.ok) return "No schedule loaded"
-                if (root.status.paused) return "Paused"
+                if (root.mode === "off") return "Off (manual)"
+                if (root.mode === "on") return "On (manual) · " + Model.tempLabel(root.status.nightTemp)
                 return Model.tempLabel(root.status.scheduledTemperature)
                        + " since " + root.status.scheduledSince
               }
@@ -173,7 +182,7 @@ Panel {
 
           Text {
             width: parent.width
-            visible: root.status.ok && !root.status.paused && root.status.nextAt !== ""
+            visible: root.status.ok && root.mode === "auto" && root.status.nextAt !== ""
             text: "Next  " + Model.tempLabel(root.status.nextTemperature)
                   + " at " + root.status.nextAt
             color: root.bar.foreground
@@ -184,8 +193,10 @@ Panel {
 
           Text {
             width: parent.width
-            visible: root.status.paused
-            text: "The display stays untinted until you resume."
+            visible: root.mode !== "auto"
+            text: root.mode === "off"
+                  ? "Held untinted until you switch back to Auto."
+                  : "Held at the night temperature until you switch back to Auto."
             color: root.bar.foreground
             opacity: 0.6
             wrapMode: Text.WordWrap
@@ -310,15 +321,45 @@ Panel {
           width: parent.width
           spacing: Style.space(8)
 
+          // Manual holds. Auto follows tonight's ladder; On and Off hold the
+          // night temperature or untinted until Auto is chosen again.
           Button {
-            text: root.status.paused ? "Resume" : "Pause"
-            iconText: root.status.paused ? "󰐊" : "󰏤"
-            enabled: !root.busy
+            text: "Auto"
+            iconText: "󱠀"
+            tooltipText: "Follow the sunset ramp"
+            selected: root.mode === "auto"
+            enabled: !root.busy && root.mode !== "auto"
             foreground: root.bar.foreground
             fontFamily: root.bar.fontFamily
             fontSize: Style.font.bodySmall
             bordered: true
-            onClicked: root.togglePause()
+            onClicked: root.setMode("auto")
+          }
+
+          Button {
+            text: "On"
+            iconText: "󱩌"
+            tooltipText: "Hold the night temperature (" + Model.tempLabel(root.status.nightTemp) + ")"
+            selected: root.mode === "on"
+            enabled: !root.busy && root.mode !== "on"
+            foreground: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+            fontSize: Style.font.bodySmall
+            bordered: true
+            onClicked: root.setMode("on")
+          }
+
+          Button {
+            text: "Off"
+            iconText: "󱓤"
+            tooltipText: "Hold untinted"
+            selected: root.mode === "off"
+            enabled: !root.busy && root.mode !== "off"
+            foreground: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+            fontSize: Style.font.bodySmall
+            bordered: true
+            onClicked: root.setMode("off")
           }
 
           Button {

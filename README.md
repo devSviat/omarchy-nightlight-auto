@@ -111,12 +111,19 @@ If you added the indicator mark below, restore the original `NightLight.qml`.
 nightlight-auto status         # what is on screen now, and what is next
 nightlight-auto show           # tonight's whole ladder
 nightlight-auto show --date 2026-12-21
+nightlight-auto on             # hold the night temperature until `auto`
+nightlight-auto off            # hold untinted until `auto` (same as pause)
+nightlight-auto auto           # follow the sunset ramp again
 nightlight-auto pause          # untinted until you resume
 nightlight-auto resume
 nightlight-auto generate       # rebuild now (the timer does this daily)
 nightlight-auto setup --print  # what setup would change, without changing it
 nightlight-auto teardown       # undo everything setup did
 ```
+
+The panel has three mode buttons: **Auto** follows tonight's ladder, **On** holds
+`night_temp` around the clock, **Off** holds untinted. On and Off stay until Auto is
+chosen again; the bar icon shows a night bulb or a crossed-out sun while one is held.
 
 The bar widget shows the stage of the evening — a sun before the ramp starts, then a
 setting sun, a crescent moon, and a new moon once it reaches the floor. Click it for
@@ -129,6 +136,7 @@ From a script or a keybinding:
 ```bash
 omarchy-shell contra.nightlight status
 omarchy-shell contra.nightlight pause | resume | toggle | rebuild
+omarchy-shell contra.nightlight on | off | auto | mode
 omarchy-shell shell toggle contra.nightlight    # open the panel
 ```
 

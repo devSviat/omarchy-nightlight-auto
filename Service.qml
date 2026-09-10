@@ -35,11 +35,15 @@ Item {
   property string disclosure: ""
   readonly property bool running: status.running
   readonly property bool paused: status.paused
+  // "auto" | "on" | "off". on/off are manual holds; auto follows the ladder.
+  readonly property string mode: status.mode
   // "Tinted" means the schedule is actually warming the screen right now, as
   // opposed to sitting on the untinted day profile.
-  readonly property bool tinted: status.ok && !status.paused
-                                 && status.scheduledTemperature !== null
-  readonly property var temperature: status.scheduledTemperature
+  readonly property bool tinted: status.ok && status.mode !== "off"
+                                 && (status.mode === "on" || status.scheduledTemperature !== null)
+  readonly property var temperature: status.mode === "on" ? status.nightTemp
+                                     : status.mode === "off" ? null
+                                     : status.scheduledTemperature
 
   // 0 at the start of the evening ramp, 1 at its deepest point.
   readonly property real rampFraction: Model.rampFraction(
@@ -48,7 +52,7 @@ Item {
   // "day" | "dusk" | "night" | "deep". Consumers map this to a glyph; keeping
   // the thresholds here means the bar widget and any indicator mark reading
   // this service can never disagree about which stage we are in.
-  readonly property string stage: Model.rampStage(root.tinted, root.rampFraction)
+  readonly property string stage: Model.rampStage(root.tinted, root.rampFraction, root.mode)
   readonly property string stageLabel: Model.stageLabel(root.stage)
 
   signal changed()
@@ -74,6 +78,7 @@ Item {
   function pause() { run(["pause"]) }
   function resume() { run(["resume"]) }
   function togglePause() { run(["toggle"]) }
+  function setMode(mode) { run([mode === "on" ? "on" : mode === "off" ? "off" : "auto"]) }
   function rebuild() { run(["generate", "--force"]) }
 
   Process {
@@ -150,5 +155,9 @@ Item {
     function resume(): string { root.resume(); return "resumed" }
     function toggle(): string { root.togglePause(); return root.paused ? "resuming" : "pausing" }
     function rebuild(): string { root.rebuild(); return "rebuilding" }
+    function on(): string { root.setMode("on"); return "on" }
+    function off(): string { root.setMode("off"); return "off" }
+    function auto(): string { root.setMode("auto"); return "auto" }
+    function mode(): string { return root.mode }
   }
 }
