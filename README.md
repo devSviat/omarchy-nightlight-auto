@@ -21,6 +21,9 @@ rebuilt as sunset moves. That is what this does.
 06:12  untinted  sunrise
 ```
 
+With `morning_anchor` set, the way back up is a ramp too, from the night floor at dawn
+to daylight at sunrise.
+
 It starts at **dusk rather than sunset**, from the daytime temperature rather than a
 warmer one, and on a curve that holds near neutral early. Sunset is still daylight; a
 filter that becomes visible then reads as firing too early. Nothing here steps — the first
@@ -192,6 +195,7 @@ If you want to pick your own on and off times from the bar, theirs is the better
 | `step_minutes` | `20` | Ladder granularity |
 | `ramp_curve_power` | `2.0` | `1.0` is a straight line; higher holds near daylight longer |
 | `morning_offset_min` | `0` | Minutes relative to sunrise for the return to day |
+| `morning_anchor` | `null` | `civil_dawn`, `nautical_dawn` or `astronomical_dawn` ramps back to day from there; `null` returns to day in one step at sunrise |
 | `fallback_sunset`, `fallback_sunrise` | `18:00`, `06:00` | Used only where the sun does not rise or set |
 | `round_to_kelvin` | `50` | Rounds emitted temperatures, to keep the file readable |
 
@@ -207,6 +211,13 @@ the first hour does very little. Set it to `1.0` for a straight line.
 An early-hours `full_tint_by` such as `"01:00"` is taken as the following morning. A time
 that has already passed by the time it gets dark keeps a short ramp rather than inverting
 it.
+
+**Mornings.** By default the day comes back in a single step at sunrise. Set
+`morning_anchor` to a dawn twilight and the ladder climbs back instead: from the night
+floor at that dawn (or `min_ramp_minutes` before sunrise, whichever is earlier) to a hair
+below daylight at sunrise, then untinted. It uses the same `step_minutes` and
+`ramp_curve_power`, which on the way up means holding the warm value while it is still
+dark and doing most of the brightening in the last stretch before the sun is up.
 
 **Anchors.** Sunset is when the sun's disc goes down and it is still light. Civil dusk
 (sun 6° below) is about when you would reach for a lamp; by nautical dusk (12°) it is

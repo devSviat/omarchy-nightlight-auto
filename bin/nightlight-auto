@@ -76,6 +76,12 @@ DEFAULTS = {
     # nothing is noticeable while there is still light outside.
     "ramp_curve_power": 2.0,
     "morning_offset_min": 0,      # relative to sunrise; when day returns
+    # Where the morning ramp back to daylight starts: "civil_dawn",
+    # "nautical_dawn" or "astronomical_dawn". null returns to day in a single
+    # step at sunrise. The ramp runs from the anchor to sunrise (plus
+    # morning_offset_min), holds warm while it is still dark and does most of
+    # its brightening close to sunrise, mirroring the evening.
+    "morning_anchor": None,
     # Used only when the sun does not rise or set (high latitudes).
     "fallback_sunset": "18:00",
     "fallback_sunrise": "06:00",
@@ -116,6 +122,9 @@ def validate(s: dict) -> None:
     if s["ramp_anchor"] not in _ALTITUDES:
         die(f"ramp_anchor must be one of {', '.join(_ALTITUDES)} "
             f"(got {s['ramp_anchor']!r})")
+    if s["morning_anchor"] is not None and s["morning_anchor"] not in _DAWN_ALTITUDES:
+        die(f"morning_anchor must be null or one of {', '.join(_DAWN_ALTITUDES)} "
+            f"(got {s['morning_anchor']!r})")
     if not (0.1 <= s["ramp_curve_power"] <= 10):
         die(f"ramp_curve_power must be between 0.1 and 10 "
             f"(got {s['ramp_curve_power']})")
@@ -229,6 +238,13 @@ _ALTITUDES = {
     "civil_dusk": -6.0,
     "nautical_dusk": -12.0,
     "astronomical_dusk": -18.0,
+}
+# The same altitudes on the way up. Civil dawn is when it is light enough to
+# see outside; by then a warm screen reads as yellow rather than cosy.
+_DAWN_ALTITUDES = {
+    "civil_dawn": -6.0,
+    "nautical_dawn": -12.0,
+    "astronomical_dawn": -18.0,
 }
 _HORIZON = math.radians(_ALTITUDES["sunset"])
 
@@ -344,10 +360,12 @@ def build_schedule(settings: dict, day: date, lat: float, lon: float, tz: ZoneIn
     if ramp_start >= latest_end:
         warn("night is shorter than one ramp step; emitting a single night profile")
         steps = [(ramp_start, settings["night_temp"])]
-        return _finish(steps, day_start, settings), {
+        morning, morning_info = _morning_ramp(
+            settings, tomorrow, lat, lon, tz, sunrise_next, day_start, ramp_start, step)
+        return _finish(steps + morning, day_start, settings), {
             "sunset": sunset, "sunrise": sunrise_next, "degenerate": degenerate,
             "ramp_start": ramp_start, "ramp_end": ramp_start, "day_start": day_start,
-            "anchor": anchor, "anchor_name": anchor_name,
+            "anchor": anchor, "anchor_name": anchor_name, **morning_info,
         }
     ramp_end = min(ramp_start + ramp, latest_end)
 
@@ -367,11 +385,62 @@ def build_schedule(settings: dict, day: date, lat: float, lon: float, tz: ZoneIn
         steps.append((ramp_start + i * (ramp_end - ramp_start) / count,
                       int(round(kelvin / quantum) * quantum)))
 
-    return _finish(steps, day_start, settings), {
+    morning, morning_info = _morning_ramp(
+        settings, tomorrow, lat, lon, tz, sunrise_next, day_start, ramp_end, step)
+
+    return _finish(steps + morning, day_start, settings), {
         "sunset": sunset, "sunrise": sunrise_next, "degenerate": degenerate,
         "ramp_start": ramp_start, "ramp_end": ramp_end, "day_start": day_start,
-        "anchor": anchor, "anchor_name": anchor_name,
+        "anchor": anchor, "anchor_name": anchor_name, **morning_info,
     }
+
+
+def _morning_ramp(settings, tomorrow: date, lat: float, lon: float, tz: ZoneInfo,
+                  sunrise_next: datetime, day_start: datetime, ramp_end: datetime,
+                  step: timedelta):
+    """The way back up: steps from the night floor towards the daytime value,
+    ending where the untinted day profile takes over. Returns (steps, info).
+
+    It mirrors the evening: anchored to a twilight rather than to sunrise,
+    interpolated in mireds, and on the same curve -- which here means holding
+    the warm value while it is still dark and doing most of the brightening in
+    the last stretch before sunrise. Nothing here steps either: the first rung
+    is the floor already on screen, and the last lands a hair below daylight.
+    """
+    name = settings["morning_anchor"]
+    info = {"morning_anchor": None, "morning_anchor_name": None,
+            "morning_start": day_start}
+    if name is None:
+        return [], info
+
+    dawn, _ = sun_times(tomorrow, lat, lon, tz, _DAWN_ALTITUDES[name])
+    if dawn is None:
+        # The sun never gets that far below the horizon tonight; lean on the
+        # minimum length instead so the morning still has a ramp.
+        dawn, name = sunrise_next, "sunrise"
+
+    minimum = timedelta(minutes=settings["min_ramp_minutes"])
+    start = min(dawn, day_start - minimum)
+    # Never run into the evening ramp; it owns the clock up to ramp_end.
+    start = max(start, ramp_end + step)
+    info.update({"morning_anchor": dawn, "morning_anchor_name": name,
+                 "morning_start": start})
+    if start >= day_start - step:
+        warn("no room for a morning ramp between the evening floor and sunrise")
+        return [], info
+
+    total = (day_start - start).total_seconds()
+    count = max(1, int(round(total / step.total_seconds())))
+    m_start, m_end = _mired(settings["night_temp"]), _mired(settings["evening_temp"])
+    quantum = settings["round_to_kelvin"]
+    power = settings["ramp_curve_power"]
+    steps = []
+    for i in range(count):
+        fraction = (i / count) ** power
+        kelvin = 1_000_000.0 / (m_start + fraction * (m_end - m_start))
+        steps.append((start + i * (day_start - start) / count,
+                      int(round(kelvin / quantum) * quantum)))
+    return steps, info
 
 
 def _ramp_length(settings, ramp_start: datetime, tz: ZoneInfo) -> timedelta:
@@ -453,8 +522,14 @@ def render_conf(steps, settings, info, lat, lon, source, tz_name) -> str:
         f" by {info['ramp_end'].strftime('%H:%M')}"
         f" ({int((info['ramp_end'] - info['ramp_start']).total_seconds() // 60)} min,"
         f" curve {settings['ramp_curve_power']})",
-        "",
     ]
+    if info.get("morning_anchor_name"):
+        lines.append(
+            f"# morning   : {settings['night_temp']}K -> {settings['evening_temp']}K"
+            f" from {info['morning_anchor_name'].replace('_', ' ')} at"
+            f" {info['morning_start'].strftime('%H:%M')}, day at"
+            f" {info['day_start'].strftime('%H:%M')}")
+    lines.append("")
     # hyprsunset treats the profile list as a 24h cycle and wraps past the last
     # entry, so plain chronological order by clock time is what it wants.
     for when, temp in sorted(steps, key=lambda item: item[0].strftime("%H:%M")):

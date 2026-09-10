@@ -480,6 +480,84 @@ def test_setup_does_not_clobber_an_existing_settings_file():
     assert json.loads(settings.read_text())["night_temp"] == 2200
 
 
+# ----------------------------------------------------------------- morning
+
+
+def test_morning_ramp_is_off_by_default():
+    # Backwards compatible: with no morning anchor the day returns in a single
+    # step at sunrise, as before.
+    (steps, info), _ = build()
+    assert info["morning_anchor_name"] is None
+    assert steps[-1][1] is None
+    assert steps[-2][0] == info["ramp_end"]
+
+
+def test_morning_ramp_runs_from_dawn_to_sunrise():
+    (steps, info), s = build(morning_anchor="civil_dawn")
+    assert info["morning_anchor_name"] == "civil_dawn"
+    # Everything after the evening floor and before the day profile is the
+    # morning ramp.
+    floor_index = max(i for i, (_, t) in enumerate(steps) if t == s["night_temp"])
+    morning = steps[floor_index + 1:]
+    assert morning[-1][1] is None and morning[-1][0] == info["day_start"]
+    temps = [t for _, t in morning if t is not None]
+    assert temps, "a morning ramp should emit steps before the day profile"
+    assert temps == sorted(temps), "the morning must only ever cool towards daylight"
+    assert temps[-1] <= s["evening_temp"]
+    # It starts at civil dawn, which leads sunrise by well under an hour. The
+    # very first rung is the floor already on screen, so it collapses away and
+    # the first emitted step sits one rung in (rungs are spaced to fit the
+    # window, so a rung can be up to half a step longer than step_minutes).
+    step = timedelta(minutes=s["step_minutes"])
+    assert info["morning_start"] <= morning[0][0] <= info["morning_start"] + step * 1.5
+    gap = (info["sunrise"] - info["morning_anchor"]).total_seconds() / 60
+    assert 15 <= gap <= 60, f"civil dawn should lead sunrise, got {gap} min"
+    assert info["morning_start"] <= info["morning_anchor"]
+    assert info["morning_start"] > info["ramp_end"]
+
+
+def test_morning_ramp_holds_warm_early_and_brightens_near_sunrise():
+    (steps, info), s = build(morning_anchor="civil_dawn", ramp_curve_power=2.0,
+                             min_ramp_minutes=60, step_minutes=5)
+    floor_index = max(i for i, (_, t) in enumerate(steps) if t == s["night_temp"])
+    temps = [t for _, t in steps[floor_index + 1:] if t is not None]
+    n = len(temps)
+    assert n >= 6
+    m = lambda k: 1e6 / k
+    first_half = m(s["night_temp"]) - m(temps[n // 2 - 1])
+    second_half = m(temps[n // 2 - 1]) - m(temps[-1])
+    assert first_half < second_half, "most of the change should sit close to sunrise"
+
+
+def test_morning_ramp_respects_the_minimum_length():
+    (steps, info), s = build(morning_anchor="civil_dawn", min_ramp_minutes=90)
+    length = (info["day_start"] - info["morning_start"]).total_seconds() / 60
+    assert length >= 89
+
+
+def test_morning_ramp_never_overlaps_the_evening():
+    (steps, info), s = build(morning_anchor="astronomical_dawn", ramp_minutes=2000,
+                             full_tint_by=None, min_ramp_minutes=3000)
+    assert info["morning_start"] > info["ramp_end"]
+    by_clock = sorted(steps, key=lambda item: item[0].strftime("%H:%M"))
+    assert len({when.strftime("%H:%M") for when, _ in by_clock}) == len(by_clock)
+
+
+def test_bad_morning_anchor_is_rejected():
+    for bad in ("sunset", "dusk", "civil_dusk", ""):
+        try:
+            nl.validate(settings(morning_anchor=bad))
+        except SystemExit:
+            continue
+        raise AssertionError(f"validate accepted morning_anchor={bad!r}")
+
+
+def test_rendered_conf_mentions_the_morning_ramp():
+    (steps, info), s = build(morning_anchor="civil_dawn")
+    text = nl.render_conf(steps, s, info, -27.4667, 153.0333, "test", "Australia/Brisbane")
+    assert "civil dawn" in text
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):
