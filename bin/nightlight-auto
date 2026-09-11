@@ -575,6 +575,20 @@ def unit_active() -> bool:
     return out.stdout.strip() == "active"
 
 
+def _clear_stray_hyprsunset() -> None:
+    """Stop a hyprsunset running outside the unit (by hand, or through uwsm
+    from `omarchy toggle nightlight`). It holds the compositor's CTM protocol,
+    so the unit's own copy exits with "A CTM manager is already running" and
+    systemd soon refuses to start it at all."""
+    if unit_active() or not hyprsunset_running():
+        return
+    subprocess.run(["pkill", "-x", "hyprsunset"], capture_output=True)
+    for _ in range(25):
+        if not hyprsunset_running():
+            break
+        time.sleep(0.2)
+
+
 def restart_hyprsunset() -> bool:
     """Reload the config. hyprsunset reads it only at startup.
 
@@ -589,12 +603,10 @@ def restart_hyprsunset() -> bool:
         subprocess.run(["systemctl", "--user", "restart", UNIT], capture_output=True)
     elif hyprsunset_running():
         # Started by hand or by `omarchy toggle nightlight`, so it is outside
-        # systemd's control. Clear it and let the unit take ownership.
-        subprocess.run(["pkill", "-x", "hyprsunset"], capture_output=True)
-        for _ in range(25):
-            if not hyprsunset_running():
-                break
-            time.sleep(0.2)
+        # systemd's control. Clear it and let the unit take ownership; the unit
+        # may already have hit its start limit against that copy.
+        _clear_stray_hyprsunset()
+        subprocess.run(["systemctl", "--user", "reset-failed", UNIT], capture_output=True)
         subprocess.run(["systemctl", "--user", "start", UNIT], capture_output=True)
     else:
         return False  # nothing to reload; the new schedule applies at next login
@@ -1023,7 +1035,11 @@ def cmd_setup(args) -> int:
     subprocess.run(["systemctl", "--user", "enable", "--now", "nightlight-auto.timer"],
                    capture_output=True)
 
-    # 4. hyprsunset from its own unit
+    # 4. hyprsunset from its own unit. A copy already running outside it would
+    # hold the CTM protocol and crash-loop the unit into its start limit.
+    _clear_stray_hyprsunset()
+    subprocess.run(["systemctl", "--user", "reset-failed", HYPRSUNSET_UNIT],
+                   capture_output=True)
     subprocess.run(["systemctl", "--user", "enable", "--now", HYPRSUNSET_UNIT],
                    capture_output=True)
 

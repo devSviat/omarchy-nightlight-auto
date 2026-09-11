@@ -637,6 +637,40 @@ def test_show_json_describes_the_phases():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def test_a_stray_hyprsunset_is_cleared_before_the_unit_starts():
+    # A hyprsunset started outside the unit holds the CTM protocol; starting
+    # the unit next to it crash-loops into systemd's start limit.
+    root = sandbox()
+    try:
+        log, flag, bin_dir = root / "calls.log", root / "stray", root / "bin"
+        flag.touch()
+        (bin_dir / "pgrep").write_text(f'#!/bin/bash\n[ -e "{flag}" ]\n')
+        (bin_dir / "pkill").write_text(f'#!/bin/bash\necho "pkill $*" >> "{log}"\nrm -f "{flag}"\n')
+        (bin_dir / "systemctl").write_text(
+            f'#!/bin/bash\necho "systemctl $*" >> "{log}"\n'
+            'case "$2" in is-active) echo inactive; exit 3;; '
+            'is-enabled) echo disabled; exit 1;; esac\nexit 0\n')
+        for name in ("pgrep", "pkill", "systemctl"):
+            (bin_dir / name).chmod(0o755)
+
+        assert run_cli(root, "setup", "--yes").returncode == 0
+        calls = log.read_text().splitlines()
+        enable = calls.index("systemctl --user enable --now hyprsunset.service")
+        assert calls.index("pkill -x hyprsunset") < enable
+        assert calls.index("systemctl --user reset-failed hyprsunset.service") < enable
+
+        # And a rebuild that finds a stray copy clears the start limit too.
+        flag.touch()
+        log.write_text("")
+        assert run_cli(root, "generate", "--force").returncode == 0
+        calls = log.read_text().splitlines()
+        start = calls.index("systemctl --user start hyprsunset.service")
+        assert calls.index("pkill -x hyprsunset") < start
+        assert calls.index("systemctl --user reset-failed hyprsunset.service") < start
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):
