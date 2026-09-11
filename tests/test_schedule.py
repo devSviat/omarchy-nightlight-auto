@@ -614,6 +614,29 @@ def test_legacy_paused_marker_reads_as_off():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def test_show_json_describes_the_phases():
+    root = sandbox()
+    try:
+        out = run_cli(root, "show", "--json")
+        assert out.returncode == 0, out.stderr
+        data = json.loads(out.stdout)
+        for key in ("mode", "ramp_start", "ramp_end", "day_start",
+                    "evening_temp", "night_temp", "anchor_name"):
+            assert key in data, key
+        assert data["mode"] == "auto"
+        assert data["morning_start"] is None
+        assert data["ramp_start"] == data["steps"][0]["time"]
+
+        cfg = root / "cfg" / "nightlight-auto"
+        cfg.mkdir(parents=True, exist_ok=True)
+        (cfg / "config.json").write_text(json.dumps({"morning_anchor": "civil_dawn"}))
+        data = json.loads(run_cli(root, "show", "--json").stdout)
+        assert data["morning_start"] is not None
+        assert data["morning_start"] < data["day_start"]
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):

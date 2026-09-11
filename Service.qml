@@ -26,6 +26,8 @@ Item {
 
   property var status: Model.emptyStatus()
   property var steps: []
+  // The whole `show --json` payload: steps plus the phase boundaries.
+  property var ladder: ({})
   property bool busy: false
 
   readonly property bool ok: status.ok
@@ -102,8 +104,10 @@ Item {
         try {
           var data = JSON.parse(String(text || "").trim())
           root.steps = (data && data.steps) ? data.steps : []
+          root.ladder = data || ({})
         } catch (e) {
           root.steps = []
+          root.ladder = ({})
         }
       }
     }

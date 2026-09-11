@@ -179,3 +179,74 @@ function pluginDirFromUrl(url) {
   if (u.indexOf("file://") === 0) u = u.slice(7)
   return u.replace(/\/$/, "")
 }
+
+// One glyph per stage, shared by the bar button and the panel hero so the two
+// can never disagree. Sun, sunset, moon, new moon as the evening deepens; a
+// night bulb and a crossed-out sun for the manual holds.
+function stageGlyph(stage) {
+  if (stage === "dusk") return "\u{F059B}"   // md-weather_sunset_down
+  if (stage === "night") return "\u{F0594}"  // md-weather_night
+  if (stage === "deep") return "\u{F0F64}"   // md-moon_new
+  if (stage === "on") return "\u{F1A4C}"     // md-lightbulb_night
+  if (stage === "off") return "\u{F14E4}"    // md-weather_sunny_off
+  return "\u{F0599}"                         // md-weather_sunny
+}
+
+// The hero's second line: what the screen is doing and what happens next.
+function heroMeta(status, tinted, temperature) {
+  if (!status.ok) return "No schedule loaded"
+  if (!status.running) return "hyprsunset is not running"
+  if (status.mode === "on") return "On until you pick Auto"
+  if (status.mode === "off") return "Off until you pick Auto"
+  if (!tinted) return status.nextAt ? ("Starts at dusk · " + status.nextAt) : "Untinted"
+  var next = status.nextTemperature
+  if (temperature !== null && temperature === status.nightTemp)
+    return "Warmest · " + (next === null ? "day at " : "brightens at ") + status.nextAt
+  if (next === null || (temperature !== null && next > temperature))
+    return "Brightening · " + (next === null ? "day" : tempLabel(next)) + " at " + status.nextAt
+  return "Warming · " + tempLabel(next) + " at " + status.nextAt
+}
+
+function modeCaption(mode, status) {
+  if (mode === "on") return "Held at " + tempLabel(status.nightTemp) + " around the clock."
+  if (mode === "off") return "Held untinted around the clock."
+  return "Warms at dusk, clears at sunrise."
+}
+
+// Tonight's two phases, for the rows under the strip.
+function phases(ladder) {
+  if (!ladder || !ladder.ramp_start) return []
+  var out = [{
+    label: "Evening",
+    times: ladder.ramp_start + " – " + ladder.ramp_end,
+    temps: ladder.evening_temp + "→" + ladder.night_temp + "K"
+  }]
+  if (ladder.morning_start) {
+    out.push({
+      label: "Morning",
+      times: ladder.morning_start + " – " + ladder.day_start,
+      temps: ladder.night_temp + "K→day"
+    })
+  } else {
+    out.push({ label: "Day", times: ladder.day_start, temps: "untinted" })
+  }
+  return out
+}
+
+// true where a step follows a long hold (the night at the floor), so the strip
+// can open a visible gap between the evening and the morning.
+function stepGaps(steps) {
+  var out = []
+  var prev = null
+  var prevDay = null
+  var shift = 0
+  for (var i = 0; i < steps.length; i++) {
+    var parts = String(steps[i].time || "0:0").split(":")
+    if (prevDay !== null && steps[i].day !== prevDay) shift += 1440
+    prevDay = steps[i].day
+    var minutes = Number(parts[0]) * 60 + Number(parts[1]) + shift
+    out.push(prev !== null && minutes - prev > 60)
+    prev = minutes
+  }
+  return out
+}

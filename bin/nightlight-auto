@@ -901,6 +901,17 @@ def cmd_show(args) -> int:
             "sunrise": info["sunrise"].strftime("%H:%M"),
             "estimated": info["degenerate"],
             "paused": is_paused(),
+            "mode": get_mode(),
+            # Phase boundaries, so a UI can describe tonight without
+            # re-deriving them from the steps.
+            "anchor_name": info["anchor_name"],
+            "ramp_start": info["ramp_start"].strftime("%H:%M"),
+            "ramp_end": info["ramp_end"].strftime("%H:%M"),
+            "morning_start": (info["morning_start"].strftime("%H:%M")
+                              if info.get("morning_anchor_name") else None),
+            "day_start": info["day_start"].strftime("%H:%M"),
+            "evening_temp": settings["evening_temp"],
+            "night_temp": settings["night_temp"],
             "steps": [
                 {
                     "time": when.strftime("%H:%M"),
