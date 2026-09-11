@@ -13,6 +13,7 @@ function emptyStatus() {
     running: false,
     paused: false,
     mode: "auto",
+    daytime: false,
     generated: false,
     setup: false,
     scheduledTemperature: null,
@@ -43,6 +44,7 @@ function parseStatus(raw) {
     s.running = data.running === true
     s.paused = data.paused === true
     s.mode = (data.mode === "on" || data.mode === "off") ? data.mode : "auto"
+    s.daytime = data.daytime === true
     s.generated = data.generated === true
     s.setup = data.setup === true
     s.scheduledTemperature = normaliseTemp(data.scheduled_temperature)
@@ -216,6 +218,7 @@ function modeCaption(mode, status) {
 // Tonight's two phases, for the rows under the strip.
 function phases(ladder) {
   if (!ladder || !ladder.ramp_start) return []
+  var day = (ladder.day_temp === null || ladder.day_temp === undefined) ? null : ladder.day_temp
   var out = [{
     label: "Evening",
     times: ladder.ramp_start + " – " + ladder.ramp_end,
@@ -225,10 +228,10 @@ function phases(ladder) {
     out.push({
       label: "Morning",
       times: ladder.morning_start + " – " + ladder.day_start,
-      temps: ladder.night_temp + "K→day"
+      temps: ladder.night_temp + "K→" + (day === null ? "day" : day + "K")
     })
   } else {
-    out.push({ label: "Day", times: ladder.day_start, temps: "untinted" })
+    out.push({ label: "Day", times: ladder.day_start, temps: day === null ? "untinted" : day + "K" })
   }
   return out
 }

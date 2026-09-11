@@ -407,7 +407,7 @@ def _morning_ramp(settings, tomorrow: date, lat: float, lon: float, tz: ZoneInfo
     interpolated in mireds, and on the same curve -- which here means holding
     the warm value while it is still dark and doing most of the brightening in
     the last stretch before sunrise. Nothing here steps either: the first rung
-    is the floor already on screen, and the last lands a hair below daylight.
+    is the floor already on screen, and the day profile takes over from the last.
     """
     name = settings["morning_anchor"]
     info = {"morning_anchor": None, "morning_anchor_name": None,
@@ -825,6 +825,18 @@ def current_temperature() -> int | None:
     return int(digits[0]) if digits else None
 
 
+def _in_daytime(now: datetime, info) -> bool:
+    """True between the return to day and the next evening ramp, on the same
+    HH:MM cycle hyprsunset follows. A numeric day_temp makes the day profile
+    a temperature too, so "not tinted" cannot be read off the value alone."""
+    def minutes(when):
+        return when.hour * 60 + when.minute
+    now_m, day_m, ramp_m = minutes(now), minutes(info["day_start"]), minutes(info["ramp_start"])
+    if day_m <= ramp_m:
+        return day_m <= now_m < ramp_m
+    return now_m >= day_m or now_m < ramp_m
+
+
 def cmd_status(args) -> int:
     settings, tz_name, tz, lat, lon, source, today, steps, info = gather()
     now = datetime.now(tz)
@@ -861,6 +873,7 @@ def cmd_status(args) -> int:
         "generated": HYPRSUNSET_CONF.exists() and MARKER in HYPRSUNSET_CONF.read_text(),
         "paused": is_paused(),
         "mode": get_mode(),
+        "daytime": _in_daytime(now, info),
         "setup": is_setup(),
     }
     if args.json:
@@ -924,6 +937,7 @@ def cmd_show(args) -> int:
             "day_start": info["day_start"].strftime("%H:%M"),
             "evening_temp": settings["evening_temp"],
             "night_temp": settings["night_temp"],
+            "day_temp": settings["day_temp"],
             "steps": [
                 {
                     "time": when.strftime("%H:%M"),

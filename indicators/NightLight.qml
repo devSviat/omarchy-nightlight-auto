@@ -27,17 +27,20 @@ BarIndicator {
   active: sunset ? (sunset.tinted || sunset.paused)
                  : (builtin ? builtin.enabled : false)
 
-  activeText: paused ? "󰖙"
-              : stage === "dusk" ? "󰖜"
+  // Same glyphs as the bar widget: crossed-out sun for off, night bulb for
+  // a manual on, then sunset, moon and new moon as the evening deepens.
+  activeText: paused ? "󱓤"
+              : stage === "on" ? "󱩌"
+              : stage === "dusk" ? "󰖛"
               : stage === "night" ? "󰖔" : "󰽤"
   inactiveText: "󰖙"
 
   activeTooltipText: {
     if (!root.sunset) return "Day Light"
-    if (root.paused) return "Night light paused - click to resume"
+    if (root.paused) return "Night light off - click for Auto"
     var t = root.sunset.temperature
     var now = (t === null ? "off" : t + "K")
-    return root.sunset.stageLabel + " \u00b7 " + now + " - click to pause"
+    return root.sunset.stageLabel + " \u00b7 " + now + " - click to turn off"
   }
 
   inactiveTooltipText: {

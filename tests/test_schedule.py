@@ -671,6 +671,31 @@ def test_a_stray_hyprsunset_is_cleared_before_the_unit_starts():
         shutil.rmtree(root, ignore_errors=True)
 
 
+def test_daytime_follows_the_clock_between_day_start_and_the_ramp():
+    tz = ZoneInfo("Australia/Brisbane")
+    (_, info), _ = build(day_temp=6000)
+    at = lambda h, m: datetime(2026, 8, 22, h, m, tzinfo=tz)
+    ds, rs = info["day_start"], info["ramp_start"]
+    assert nl._in_daytime(at(12, 0), info)
+    assert nl._in_daytime(at(ds.hour, ds.minute), info)
+    assert not nl._in_daytime(at(rs.hour, rs.minute), info)
+    assert not nl._in_daytime(at(22, 0), info)
+    assert not nl._in_daytime(at(3, 0), info)
+
+
+def test_status_and_show_describe_a_tinted_day():
+    root = sandbox()
+    try:
+        cfg = root / "cfg" / "nightlight-auto"
+        cfg.mkdir(parents=True, exist_ok=True)
+        (cfg / "config.json").write_text(json.dumps({"day_temp": 6000}))
+        status = json.loads(run_cli(root, "status", "--json").stdout)
+        assert isinstance(status["daytime"], bool)
+        assert json.loads(run_cli(root, "show", "--json").stdout)["day_temp"] == 6000
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 if __name__ == "__main__":
     failures = 0
     for name, fn in sorted(globals().items()):

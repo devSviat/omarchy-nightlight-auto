@@ -41,8 +41,11 @@ Item {
   readonly property string mode: status.mode
   // "Tinted" means the schedule is actually warming the screen right now, as
   // opposed to sitting on the untinted day profile.
+  // A numeric day_temp gives the day profile a temperature too, so the day is
+  // told apart by the clock (status.daytime), not by the value.
   readonly property bool tinted: status.ok && status.mode !== "off"
-                                 && (status.mode === "on" || status.scheduledTemperature !== null)
+                                 && (status.mode === "on"
+                                     || (!status.daytime && status.scheduledTemperature !== null))
   readonly property var temperature: status.mode === "on" ? status.nightTemp
                                      : status.mode === "off" ? null
                                      : status.scheduledTemperature

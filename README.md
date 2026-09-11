@@ -286,6 +286,8 @@ python3 tests/test_schedule.py
 Covers the solar math against published almanac times for Brisbane, London (across a DST
 boundary), New York and Nairobi; polar day and polar night; the ladder's shape, ordering,
 clamping and mired spacing; and the rendered config's structure.
+Also the morning ramp, the manual On / Off / Auto modes, and taking over a hyprsunset
+started outside its unit.
 
 ## Requirements
 

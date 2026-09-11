@@ -319,7 +319,7 @@ Panel {
               return n
             }
             readonly property real segment: root.steps.length > 0
-              ? (width - spacing * (root.steps.length - 1) - gapWidth * gapCount) / root.steps.length
+              ? Math.max(0, (width - spacing * (root.steps.length - 1) - gapWidth * gapCount) / root.steps.length)
               : 0
 
             Repeater {
