@@ -227,13 +227,46 @@ function phases(ladder) {
   if (ladder.morning_start) {
     out.push({
       label: "Morning",
-      times: ladder.morning_start + " – " + ladder.day_start,
+      times: morningStart(ladder) + " – " + ladder.day_start,
       temps: ladder.night_temp + "K→" + (day === null ? "day" : day + "K")
     })
   } else {
     out.push({ label: "Day", times: ladder.day_start, temps: day === null ? "untinted" : day + "K" })
   }
   return out
+}
+
+// Minutes past midnight, for a "HH:MM" the CLI printed.
+function clockMinutes(hhmm) {
+  var parts = String(hhmm || "0:0").split(":")
+  return Number(parts[0]) * 60 + Number(parts[1])
+}
+
+// When the morning row starts, as the strip draws it.
+//
+// The generator anchors the morning ramp to dawn, but its leading rungs round
+// back to the floor already on screen and are dropped as no-ops, so the ladder
+// begins later than `morning_start` says. Report the first rung that actually
+// changes the screen -- otherwise the row names a minute where nothing happens
+// and disagrees with the strip beside it.
+//
+// The morning window is what picks those rungs out, not the gap in the strip:
+// a long-enough evening can collapse rungs of its own and open a gap there too.
+// Plain clock minutes are enough to test it. The window sits between dawn and
+// sunrise, and every evening rung falls outside it -- above it before midnight,
+// below it after, for a ramp that runs that late.
+function morningStart(ladder) {
+  if (!ladder || !ladder.morning_start) return ""
+  var steps = ladder.steps || []
+  var from = clockMinutes(ladder.morning_start)
+  var until = clockMinutes(ladder.day_start)
+  for (var i = 0; i < steps.length; i++) {
+    var at = clockMinutes(steps[i].time)
+    if (at >= from && at < until) return steps[i].time
+  }
+  // Nothing of the morning survived the collapse: the floor holds until the day
+  // profile takes over. Name the anchor rather than inventing a time.
+  return ladder.morning_start
 }
 
 // true where a step follows a long hold (the night at the floor), so the strip
@@ -244,10 +277,9 @@ function stepGaps(steps) {
   var prevDay = null
   var shift = 0
   for (var i = 0; i < steps.length; i++) {
-    var parts = String(steps[i].time || "0:0").split(":")
     if (prevDay !== null && steps[i].day !== prevDay) shift += 1440
     prevDay = steps[i].day
-    var minutes = Number(parts[0]) * 60 + Number(parts[1]) + shift
+    var minutes = clockMinutes(steps[i].time) + shift
     out.push(prev !== null && minutes - prev > 60)
     prev = minutes
   }
