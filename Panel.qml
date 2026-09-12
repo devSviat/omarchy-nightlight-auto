@@ -302,9 +302,10 @@ Panel {
             }
           }
 
-          // The ladder as one strip: each segment is a step, painted in the
-          // tint it applies. The live step stands taller; a gap marks the night
-          // held at the floor. Hover a segment for its time.
+          // The ladder as one strip: each square is a step, painted in the
+          // tint it applies. The live step stands taller; the night, which
+          // holds at the floor instead of stepping, gets a square of its own in
+          // that same tint. Hover a square for its time.
           Row {
             id: strip
             width: parent.width
@@ -312,14 +313,16 @@ Panel {
             visible: root.steps.length > 0
 
             readonly property var gaps: Model.stepGaps(root.steps)
-            readonly property int gapWidth: Style.space(8)
             readonly property int gapCount: {
               var n = 0
               for (var i = 0; i < gaps.length; i++) if (gaps[i]) n++
               return n
             }
-            readonly property real segment: root.steps.length > 0
-              ? Math.max(0, (width - spacing * (root.steps.length - 1) - gapWidth * gapCount) / root.steps.length)
+            // Every hold takes a slot of its own, so all the squares come out
+            // the same width and the strip stays evenly divided.
+            readonly property int slots: root.steps.length + gapCount
+            readonly property real segment: slots > 0
+              ? Math.max(0, (width - spacing * (slots - 1)) / slots)
               : 0
 
             Repeater {
@@ -330,13 +333,62 @@ Panel {
                 required property var modelData
                 required property int index
                 readonly property bool gapBefore: strip.gaps[index] === true
-                readonly property bool live: modelData.current === true && root.mode === "auto"
+                // The rung whose hold comes next is `current` for as long as
+                // that hold lasts, so the live marker moves onto the hold: it
+                // is the stretch the screen is actually in.
+                readonly property bool handsOver: strip.gaps[index + 1] === true
+                readonly property bool live: modelData.current === true
+                  && root.mode === "auto" && !handsOver
+                // What the screen sits at through the hold, and since when:
+                // the step before it, which the hold simply keeps.
+                readonly property var previous: index > 0 ? root.steps[index - 1] : null
+                readonly property var heldTemp: previous ? previous.temperature : null
+                readonly property string heldFrom: previous ? previous.time : ""
+                readonly property bool holdLive: gapBefore && root.mode === "auto"
+                  && previous && previous.current === true
+                // Where this step's own square sits: after the hold, if any.
+                readonly property real offset: gapBefore ? strip.segment + strip.spacing : 0
 
-                width: strip.segment + (gapBefore ? strip.gapWidth : 0)
+                width: strip.segment + offset
                 height: Style.space(16)
 
+                // The night does not step, it holds at the floor for hours.
+                // Draw that hold as its own square in the tint it holds, so the
+                // strip runs unbroken from dusk to day.
                 Rectangle {
-                  x: step.gapBefore ? strip.gapWidth : 0
+                  id: hold
+                  visible: step.gapBefore
+                  x: 0
+                  width: strip.segment
+                  anchors.top: parent.top
+                  anchors.bottom: parent.bottom
+                  anchors.topMargin: step.holdLive ? 0 : Style.space(4)
+                  anchors.bottomMargin: step.holdLive ? 0 : Style.space(4)
+                  radius: Math.min(2, Style.cornerRadius)
+                  color: Model.temperatureColor(step.heldTemp)
+                  border.width: 1
+                  border.color: step.holdLive ? root.foreground
+                    : Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.2)
+                }
+
+                MouseArea {
+                  id: holdMouse
+                  visible: step.gapBefore
+                  anchors.fill: hold
+                  hoverEnabled: true
+                }
+
+                PanelToolTip {
+                  parent: hold
+                  visible: holdMouse.containsMouse
+                  text: step.heldFrom + " – " + step.modelData.time + "  held at "
+                        + (step.heldTemp === null ? "untinted" : step.heldTemp + "K")
+                  fontFamily: root.fontFamily
+                }
+
+                Rectangle {
+                  id: rung
+                  x: step.offset
                   width: strip.segment
                   anchors.top: parent.top
                   anchors.bottom: parent.bottom
@@ -353,11 +405,12 @@ Panel {
 
                 MouseArea {
                   id: stepMouse
-                  anchors.fill: parent
+                  anchors.fill: rung
                   hoverEnabled: true
                 }
 
                 PanelToolTip {
+                  parent: rung
                   visible: stepMouse.containsMouse
                   text: step.modelData.time + "  " + (step.modelData.temperature === null
                         ? "untinted" : step.modelData.temperature + "K")
